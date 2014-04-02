@@ -25,11 +25,13 @@ line. We would like to go a little further with the data than we have so far
 library(arrayQualityMetrics)
 library(RColorBrewer)
 library(pd.mogene.1.0.st.v1)
+library(mogene10sttranscriptcluster.db)
 library(oligo)
 library(limma)
 library(plyr)
 library(ggplot2)
 library(grid)
+library(gridExtra)
 library(xtable)
 
 source("~/R/scripts/useful functions/roc.R")
@@ -59,6 +61,10 @@ pd <- read.AnnotatedDataFrame('covars.desc')
 data <- read.celfiles(rownames(pData(pd)))
 phenoData(data) <- pd
 
+# Convert to factors
+pData(data)$celltype <- factor(pData(data)$celltype)
+pData(data)$Batch <- factor(pData(data)$Batch)
+
 # restore previous working directory
 setwd(prevWorkDir)
 ```
@@ -73,7 +79,7 @@ arrayQualityMetrics(expressionset=data, intgroup=c('celltype', 'Batch'),
                     
 ```
 
-from the QC report, the data look ok. A heatmap cluster shows that samples cluster by cell type, whch is good. Batch 2 samples are somewhat close to one another, but its possible this will be less evident after normalization.
+Based on the QC report, the data look ok. A heatmap cluster shows that samples cluster by cell type, which is good. Batch 2 samples are not completely segregated, clustering amongst other induced nociceptor samples.
 
 ```{r image1 , fig.align='center', echo=FALSE}
 
@@ -82,30 +88,179 @@ img1 <- readPNG("./results/report_raw/hm.png")
  grid.raster(img1)
 ```
 
-Boxplots representing summaries of the signal intensity distributions of the arrays, are also mostly similar in position in widths. Arrays that look most different are in the 'induced nociceptor group' and is possibly due to the two batches.
+Boxplots, representing summaries of the signal intensity distributions of the arrays, are also mostly similar in position and widths. Arrays that look most different are in the 'induced nociceptor group' and is possibly due to the two batches.
 
 ```{r image2 , fig.align='center', echo=FALSE}
-
-require(png)
 img2 <- readPNG("./results/report_raw/box.png")
  grid.raster(img2)
 ```
 
 ## Quality check after normalization 
-The data was pre-processed and normalized using RMA (Robust Multiarray Analysis) algorithm. RMA is the standard method for performing background subtraction, normalization and averaging. With the processed data we find that signal intensity is more simialrly distributed across the arrays. Density estimates also show no indication of lareg outliers as the smoothed histograms for each array have similar shapes and ranges. 
-
-
-```{r qcnorm}
-
+The data was pre-processed and normalized using RMA() (Robust Multiarray Analysis) algorithm. RMA is the standard method for performing background subtraction, normalization and averaging. With the processed data we find that signal intensity is more similarly distributed across the arrays. Density estimates also show no indication of major outliers as the smoothed histograms for each array have similar shapes and ranges. 
+```{r rma}
 # apply rma
 data.rma <- rma(data)
+```
 
+```{r qcnorm, echo=FALSE, eval=FALSE}
+arrayQualityMetrics(expressionset=data.rma, intgroup=c('celltype', 'Batch'),
+                    outdir='./results/report_rma', force=TRUE,  do.logtransform=FALSE)
+                    
+```
+
+```{r image3, echo=FALSE}
 # plot some quick quality figures
-boxplot(data.rma, main="", xaxt="n")
-hist(data.rma, main="")
+img3 <- readPNG("./results/report_rma/box.png")
+ grid.raster(img3) 
+```
+
+```{r image4 , echo=FALSE}
+img4 <- readPNG("./results/report_rma/dens.png")
+ grid.raster(img4) 
+```
+### PCA 
+Plot all pairwise combinations of the first 5 principal components for the samples. The more similar the samples are, the closer they will cluster in these plots. In the first one below cell type is coded by color.
+
+```{r calculate_PCA, echo=FALSE, fig.align='center'}
+myPca <- prcomp(t(exprs(data.rma)))
+pc<-myPca$x
+
+# Plot first factor of interest
+tmpPCAData <- as.data.frame(myPca$x[,1:5])
+colors <- c("#FF4040", "#6495ED", "#458B00") # to match colors from AQM
+plot(tmpPCAData, col=colors[pData(data.rma)[,"celltype"]], pch=19)
+```
+
+In the second plot the color coding represents the two batches. A second run of induced nociceptor samples were run in the second batch. Here, we see that while the data clusters well into three cell populations in the first and second principal components - the batches are evident in PC3. What do we do?
+
+```{r calculate_PCA2, echo=FALSE, fig.align='center'}
+# Plot second factor of interest
+tmpPCAData <- as.data.frame(myPca$x[,1:5])
+colors <- rainbow(length(levels(pData(data.rma)[,'Batch'])))
+plot(tmpPCAData, col=colors[pData(data.rma)[,'Batch']], pch=19)
 
 ```
 
+## Differential expression analysis
+Here, we applied [limma](http://www.bioconductor.org/packages/release/bioc/html/limma.html) to the data and used a linear modeling approach to identify gene expression changes between the different cell populations. Both cell type and Batch were included in the model and we looked at contrasts between the different cell types. 
+
+```{r}
+
+# Load the control annotations
+data(mogene10stCONTROL, package="ArrayTools") 
+
+# Remove control probes from data
+gene <- data.rma[!(row.names(exprs(data.rma)) %in% mogene10stCONTROL[,1]),]
+
+# Model matrix
+pd <-pData(data.rma)
+mod<-model.matrix(~celltype + Batch -1, data=pd)
+
+# Fit a linear model
+fit <- lmFit(gene, mod)
+
+# Define a comtrast model matrix
+cont.matrix <- makeContrasts(MEFvsDRG="celltypeMEF-celltypeDRG", MEFvsiNoc="celltypeMEF-celltypeiNoc", 
+                             iNocvsDRG="celltypeiNoc-celltypeDRG", levels=mod)
+
+# Extract the linear model fit for the contrasts
+fit2  <- contrasts.fit(fit, cont.matrix)
+fit2  <- eBayes(fit2)
+
+# Set threshold 
+p.cutoff <- 0.001
+logfc.cutoff <- 2
+
+# Get gene tables
+MEFvsDRG <- topTable(fit2, coef=1, number=nrow(exprs(gene)))
+MEFvsiNoc <- topTable(fit2, coef=2, number=nrow(exprs(gene)))
+iNocvsDRG <- topTable(fit2, coef=3, number=nrow(exprs(gene)))
+
+```
+
+### Volcano plots
+Gene expression changes were assessed by three different comparisons:
+
+1. mouse embryonic fibrolasts vs dorsal root ganglion
+2. mouse embryonic fibroblasts vs induced nociceptor 
+3. induce nociceptor vs dorsal root ganglion
+
+The third comparison is where would anticipate to see the least amount of change, under the assumption that the transdifferentiation process was successful. Along the same vein, we would probabaly expect to see a good amount of overlap between the genes identified in the first two comparisons. The volcano plots below highlight the findings from each comparison with significant probes (FDR < 0.001; logFC > 2) represented in turquoise.
+
+```{r volcanoplot, echo=FALSE, fig.align='center', results='asis'}
+
+# Highlight genes 
+MEFvsDRG$threshold.FDR = as.factor(abs(MEFvsDRG$logFC) > logfc.cutoff & MEFvsDRG$adj.P.Val < p.cutoff)
+MEFvsiNoc$threshold.FDR = as.factor(abs(MEFvsiNoc$logFC) > logfc.cutoff & MEFvsiNoc$adj.P.Val < p.cutoff) 
+iNocvsDRG$threshold.FDR = as.factor(abs(iNocvsDRG$logFC) > logfc.cutoff & iNocvsDRG$adj.P.Val < p.cutoff)
+
+SigGenes <- c(length(which(MEFvsDRG$threshold.FDR =="TRUE")), length(which(MEFvsiNoc$threshold.FDR =="TRUE")),
+                   length(which(iNocvsDRG$threshold.FDR =="TRUE")))
+
+##Construct the plot objects
+p1 <- ggplot(data=MEFvsDRG, aes(x=logFC, y=-log10(P.Value), colour=threshold.FDR)) +
+  geom_point(alpha=0.4, size=1.75) +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(2.0)),
+        axis.title = element_text(size = rel(1.5)),
+        axis.text = element_text(size = rel(1.25))) +
+  ggtitle('MEF versus DRG') +
+  xlim(c(-10, 10)) + ylim(c(0, 15)) +
+  xlab("log2 fold change") + ylab("-log10 p-value")
+
+p2 <- ggplot(data=MEFvsiNoc, aes(x=logFC, y=-log10(P.Value), colour=threshold.FDR)) +
+  geom_point(alpha=0.4, size=1.75) +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(2.0)),
+        axis.title = element_text(size = rel(1.5)),
+        axis.text = element_text(size = rel(1.25))) +
+  ggtitle('MEF versus iNoc') +
+  xlim(c(-10, 10)) + ylim(c(0, 15)) +
+  xlab("log2 fold change") + ylab("-log10 p-value")
+
+p3 <- ggplot(data=iNocvsDRG, aes(x=logFC, y=-log10(P.Value), colour=threshold.FDR)) +
+  geom_point(alpha=0.4, size=1.75) +
+  theme(legend.position = "none",
+        plot.title = element_text(size = rel(2.0)),
+        axis.title = element_text(size = rel(1.5)),
+        axis.text = element_text(size = rel(1.25))) +
+  ggtitle('iNoc versus DRG') +
+  xlim(c(-10, 10)) + ylim(c(0, 15)) +
+  xlab("log2 fold change") + ylab("-log10 p-value")
+
+grid.arrange(p1, p2, p3, nrow = 2, ncol = 2)
+
+kable(cbind(colnames(fit2$coefficients), SigGenes), format='html')
+```
+
+
+### Overlapping significant genes
+The number of overlapping genes between the three different comparisons:
+```{r image5 , echo=FALSE}
+img5 <- readPNG("./results/overlappingGenes.png")
+ grid.raster(img5) 
+```
+
+
+```{r annotate, echo=FALSE, eval=FALSE}
+
+rids <- rownames(exprs(data.rma))
+
+# Get annotations into matrix
+ac <- unlist(mget(rids, mogene10sttranscriptclusterACCNUM, ifnotfound=NA))
+en <- unlist(mget(rids, mogene10sttranscriptclusterENTREZID, ifnotfound=NA))
+gn <- unlist(mget(rids, mogene10sttranscriptclusterGENENAME, ifnotfound=NA))
+sm <- unlist(mget(rids, mogene10sttranscriptclusterSYMBOL, ifnotfound=NA))
+an <- cbind(id=rids, accession=ac, entrez=en, genename=gn, symbol=sm)
+
+# Merge annotation for each comparison
+annot1 <- merge(MEFvsDRG, ann, by='row.names')
+annot2 <- merge(MEFvsiNoc, ann, by='row.names')
+annot3 <- merge(iNocvsDRG, ann, by='row.names')
+
+# Write to file
+
+```
 
 
 
