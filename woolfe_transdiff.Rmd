@@ -1,0 +1,112 @@
+Woolfe Lab: Transdifferentiation of neurons
+========================================================
+
+
+```{r setup, echo=FALSE}
+opts_chunk$set(tidy=TRUE, echo=TRUE, highlight=TRUE, figalign='center', fig.height=9, fig.width=9, out.width='800px', message=FALSE, error=TRUE, warning=FALSE, cache=FALSE)
+
+# Setup report details
+clientname="Liz Buttermore"
+clientemail="elizabeth.buttermore@childrens.harvard.edu"
+lablocation="Woolfe Lab"
+analystname="Meeta Mistry"
+analystemail="mmistry@hsph.harvard.edu"
+
+```
+
+Array analysis for `r clientname` (`r clientemail`) at `r lablocation`. Contact `r analystname` (`r analystemail`) for additional details. Request from client was:
+  
+> Basically we are comparing expression profiles of three populations of cells and there is a good amount of variability between replicate samples for one of the populations because it is a fibroblast-derived neuronal cell
+line. We would like to go a little further with the data than we have so far
+
+## Bioconductor and R libraries used
+```{r, libraries, echo=TRUE}
+
+library(arrayQualityMetrics)
+library(RColorBrewer)
+library(pd.mogene.1.0.st.v1)
+library(oligo)
+library(limma)
+library(plyr)
+library(ggplot2)
+library(grid)
+library(xtable)
+
+source("~/R/scripts/useful functions/roc.R")
+
+```
+
+### Get variables
+- get base directory for analyses
+- specify data and results directories
+- specify column headers used in metadata file
+
+
+```{r variables, echo=TRUE}
+# Setup directory variables
+baseDir <- '.'
+dataDir <- file.path(baseDir, "data")
+metaDir <- file.path(dataDir, "meta")
+resultsDir <- file.path(baseDir, "results")
+```
+
+### Load the data and metadata
+```{r load data}
+prevWorkDir = getwd()
+
+setwd("data/")
+pd <- read.AnnotatedDataFrame('covars.desc')
+data <- read.celfiles(rownames(pData(pd)))
+phenoData(data) <- pd
+
+# restore previous working directory
+setwd(prevWorkDir)
+```
+
+
+## Quality control on raw data
+ArrayQualityMetrics QC report for the data can be found [here](./results/report_raw/index.html)
+
+```{r QC, echo=FALSE, eval=FALSE}
+arrayQualityMetrics(expressionset=data, intgroup=c('celltype', 'Batch'),
+                    outdir='./results/report_raw', force=TRUE,  do.logtransform=TRUE)
+                    
+```
+
+from the QC report, the data look ok. A heatmap cluster shows that samples cluster by cell type, whch is good. Batch 2 samples are somewhat close to one another, but its possible this will be less evident after normalization.
+
+```{r image1 , fig.align='center', echo=FALSE}
+
+require(png)
+img1 <- readPNG("./results/report_raw/hm.png")
+ grid.raster(img1)
+```
+
+Boxplots representing summaries of the signal intensity distributions of the arrays, are also mostly similar in position in widths. Arrays that look most different are in the 'induced nociceptor group' and is possibly due to the two batches.
+
+```{r image2 , fig.align='center', echo=FALSE}
+
+require(png)
+img2 <- readPNG("./results/report_raw/box.png")
+ grid.raster(img2)
+```
+
+## Quality check after normalization 
+The data was pre-processed and normalized using RMA (Robust Multiarray Analysis) algorithm. RMA is the standard method for performing background subtraction, normalization and averaging. With the processed data we find that signal intensity is more simialrly distributed across the arrays. Density estimates also show no indication of lareg outliers as the smoothed histograms for each array have similar shapes and ranges. 
+
+
+```{r qcnorm}
+
+# apply rma
+data.rma <- rma(data)
+
+# plot some quick quality figures
+boxplot(data.rma, main="", xaxt="n")
+hist(data.rma, main="")
+
+```
+
+
+
+
+
