@@ -90,18 +90,19 @@ ArrayQualityMetrics QC report for the data can be found [here](./results/report_
 
 
 
-Based on the QC report, the data look ok. A heatmap cluster shows that samples cluster by cell type, which is good. Batch 2 samples are not completely segregated, clustering amongst other induced nociceptor samples.
+A heatmap cluster shows that samples cluster by cell type, which is good. Batch 2 samples tend to cluster together, but they also cluster amongst induced nociceptor samples from Batch 1.
 
 <img src="figure/image1_.png" title="plot of chunk image1 " alt="plot of chunk image1 " width="800px" style="display: block; margin: auto;" />
 
 
-Boxplots, representing summaries of the signal intensity distributions of the arrays, are also mostly similar in position and widths. Arrays that look most different are in the 'induced nociceptor group' and is possibly due to the two batches.
+Boxplots, representing summaries of the signal intensity distributions of the arrays, are mostly similar in position and widths. Arrays that look most different are in the 'induced nociceptor group' and is possibly due to the two batches. 
 
 <img src="figure/image2_.png" title="plot of chunk image2 " alt="plot of chunk image2 " width="800px" style="display: block; margin: auto;" />
 
 
 ## Quality check after normalization 
-The data was pre-processed and normalized using RMA() (Robust Multiarray Analysis) algorithm. RMA is the standard method for performing background subtraction, normalization and averaging. With the processed data we find that signal intensity is more similarly distributed across the arrays. Density estimates also show no indication of major outliers as the smoothed histograms for each array have similar shapes and ranges. 
+The data was pre-processed and normalized using RMA() (Robust Multiarray Analysis) algorithm. RMA is the standard method for performing background subtraction, normalization and averaging. With the processed data we find that signal intensity is more similarly distributed across the arrays. Although, based on the QC report Array #8 appears to be an outlier and will be removed for downstream analysis. Density estimates show no indication of major outliers as the smoothed histograms for each array have similar shapes and ranges. 
+
 
 ```r
 # apply rma
@@ -124,18 +125,18 @@ data.rma <- rma(data)
 <img src="figure/image4_.png" title="plot of chunk image4 " alt="plot of chunk image4 " width="800px" />
 
 ### PCA 
-Plot all pairwise combinations of the first 5 principal components for the samples. The more similar the samples are, the closer they will cluster in these plots. In the first one below cell type is coded by color.
+Plot all pairwise combinations of the first 5 principal components for the samples. The more similar the samples are, the closer they will cluster in these plots. In the first one below cell type is coded using the same color key as above.
 
 <img src="figure/calculate_PCA.png" title="plot of chunk calculate_PCA" alt="plot of chunk calculate_PCA" width="800px" style="display: block; margin: auto;" />
 
 
-In the second plot the color coding represents the two batches. A second run of induced nociceptor samples were run in the second batch.
+In the second plot the color coding represents the two batches (red = batch1; cyan = batch 2). A second run of induced nociceptor samples were run in the second batch. Here, we see that while the data clusters well into three cell populations in the first and second principal components - the batches are evident in PC3. 
 
 <img src="figure/calculate_PCA2.png" title="plot of chunk calculate_PCA2" alt="plot of chunk calculate_PCA2" width="800px" style="display: block; margin: auto;" />
 
 
 ## Differential expression analysis
-Here, we applied [limma](http://www.bioconductor.org/packages/release/bioc/html/limma.html) to the data and used a linear modeling approach to identify gene expression changes between the different cell populations. Both cell type and Batch were included in the model and we looked at contrasts between the different cell types. 
+We applied [limma](http://www.bioconductor.org/packages/release/bioc/html/limma.html) to the data and used a linear modeling approach to identify gene expression changes between the different cell populations. Both cell type and Batch were included in the model and we looked at contrasts between the different cell types. 
 
 
 ```r
@@ -146,9 +147,10 @@ data(mogene10stCONTROL, package = "ArrayTools")
 # Remove control probes from data
 gene <- data.rma[!(row.names(exprs(data.rma)) %in% mogene10stCONTROL[, 1]), 
     ]
+gene <- gene[, which(colnames(gene) %in% names(bo.out) == F)]
 
 # Model matrix
-pd <- pData(data.rma)
+pd <- pData(gene)
 mod <- model.matrix(~celltype + Batch - 1, data = pd)
 
 # Fit a linear model
@@ -173,7 +175,7 @@ iNocvsDRG <- topTable(fit2, coef = 3, number = nrow(exprs(gene)))
 ```
 
 
-## Volcano plots
+### Volcano plots
 Gene expression changes were assessed by three different comparisons:
 
 1. mouse embryonic fibrolasts vs dorsal root ganglion
@@ -182,7 +184,11 @@ Gene expression changes were assessed by three different comparisons:
 
 The third comparison is where would anticipate to see the least amount of change, under the assumption that the transdifferentiation process was successful. Along the same vein, we would probabaly expect to see a good amount of overlap between the genes identified in the first two comparisons. The volcano plots below highlight the findings from each comparison with significant probes (FDR < 0.001; logFC > 2) represented in turquoise.
 
-<img src="figure/volcanoplot.png" title="plot of chunk volcanoplot" alt="plot of chunk volcanoplot" width="800px" style="display: block; margin: auto;" /><table>
+<img src="figure/volcanoplot.png" title="plot of chunk volcanoplot" alt="plot of chunk volcanoplot" width="800px" style="display: block; margin: auto;" />
+
+
+### Table of significant genes
+<table>
  <thead>
   <tr>
    <th>  </th>
@@ -192,15 +198,15 @@ The third comparison is where would anticipate to see the least amount of change
 <tbody>
   <tr>
    <td> MEFvsDRG </td>
-   <td> 2880 </td>
+   <td> 2885 </td>
   </tr>
   <tr>
    <td> MEFvsiNoc </td>
-   <td> 1083 </td>
+   <td> 1209 </td>
   </tr>
   <tr>
    <td> iNocvsDRG </td>
-   <td> 1752 </td>
+   <td> 1648 </td>
   </tr>
 </tbody>
 </table>

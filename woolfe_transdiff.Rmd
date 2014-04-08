@@ -79,16 +79,15 @@ arrayQualityMetrics(expressionset=data, intgroup=c('celltype', 'Batch'),
                     
 ```
 
-Based on the QC report, the data look ok. A heatmap cluster shows that samples cluster by cell type, which is good. Batch 2 samples are not completely segregated, clustering amongst other induced nociceptor samples.
+A heatmap cluster shows that samples cluster by cell type, which is good. Batch 2 samples tend to cluster together, but they also cluster amongst induced nociceptor samples from Batch 1.
 
 ```{r image1 , fig.align='center', echo=FALSE}
-
 require(png)
 img1 <- readPNG("./results/report_raw/hm.png")
- grid.raster(img1)
+grid.raster(img1)
 ```
 
-Boxplots, representing summaries of the signal intensity distributions of the arrays, are also mostly similar in position and widths. Arrays that look most different are in the 'induced nociceptor group' and is possibly due to the two batches.
+Boxplots, representing summaries of the signal intensity distributions of the arrays, are mostly similar in position and widths. Arrays that look most different are in the 'induced nociceptor group' and is possibly due to the two batches. 
 
 ```{r image2 , fig.align='center', echo=FALSE}
 img2 <- readPNG("./results/report_raw/box.png")
@@ -96,7 +95,8 @@ img2 <- readPNG("./results/report_raw/box.png")
 ```
 
 ## Quality check after normalization 
-The data was pre-processed and normalized using RMA() (Robust Multiarray Analysis) algorithm. RMA is the standard method for performing background subtraction, normalization and averaging. With the processed data we find that signal intensity is more similarly distributed across the arrays. Density estimates also show no indication of major outliers as the smoothed histograms for each array have similar shapes and ranges. 
+The data was pre-processed and normalized using RMA() (Robust Multiarray Analysis) algorithm. RMA is the standard method for performing background subtraction, normalization and averaging. With the processed data we find that signal intensity is more similarly distributed across the arrays. Although, based on the QC report Array #8 appears to be an outlier and will be removed for downstream analysis. Density estimates show no indication of major outliers as the smoothed histograms for each array have similar shapes and ranges. 
+
 ```{r rma}
 # apply rma
 data.rma <- rma(data)
@@ -112,6 +112,13 @@ arrayQualityMetrics(expressionset=data.rma, intgroup=c('celltype', 'Batch'),
 # plot some quick quality figures
 img3 <- readPNG("./results/report_rma/box.png")
  grid.raster(img3) 
+
+# Get boxplot outliers
+preparedData=prepdata(expressionset=data.rma, intgroup=c('celltype', 'Batch'), 
+                      do.logtransform=F)
+# Boxplots
+bo<- aqm.boxplot(preparedData, subsample=10000, outlierMethod= "KS") 
+bo.out<-bo@outliers@which
 ```
 
 ```{r image4 , echo=FALSE}
@@ -119,7 +126,7 @@ img4 <- readPNG("./results/report_rma/dens.png")
  grid.raster(img4) 
 ```
 ### PCA 
-Plot all pairwise combinations of the first 5 principal components for the samples. The more similar the samples are, the closer they will cluster in these plots. In the first one below cell type is coded by color.
+Plot all pairwise combinations of the first 5 principal components for the samples. The more similar the samples are, the closer they will cluster in these plots. In the first one below cell type is coded using the same color key as above.
 
 ```{r calculate_PCA, echo=FALSE, fig.align='center'}
 myPca <- prcomp(t(exprs(data.rma)))
@@ -131,7 +138,7 @@ colors <- c("#FF4040", "#6495ED", "#458B00") # to match colors from AQM
 plot(tmpPCAData, col=colors[pData(data.rma)[,"celltype"]], pch=19)
 ```
 
-In the second plot the color coding represents the two batches. A second run of induced nociceptor samples were run in the second batch. Here, we see that while the data clusters well into three cell populations in the first and second principal components - the batches are evident in PC3. What do we do?
+In the second plot the color coding represents the two batches (red = batch1; cyan = batch 2). A second run of induced nociceptor samples were run in the second batch. Here, we see that while the data clusters well into three cell populations in the first and second principal components - the batches are evident in PC3. 
 
 ```{r calculate_PCA2, echo=FALSE, fig.align='center'}
 # Plot second factor of interest
@@ -142,7 +149,7 @@ plot(tmpPCAData, col=colors[pData(data.rma)[,'Batch']], pch=19)
 ```
 
 ## Differential expression analysis
-Here, we applied [limma](http://www.bioconductor.org/packages/release/bioc/html/limma.html) to the data and used a linear modeling approach to identify gene expression changes between the different cell populations. Both cell type and Batch were included in the model and we looked at contrasts between the different cell types. 
+We applied [limma](http://www.bioconductor.org/packages/release/bioc/html/limma.html) to the data and used a linear modeling approach to identify gene expression changes between the different cell populations. Both cell type and Batch were included in the model and we looked at contrasts between the different cell types. 
 
 ```{r}
 
@@ -151,9 +158,10 @@ data(mogene10stCONTROL, package="ArrayTools")
 
 # Remove control probes from data
 gene <- data.rma[!(row.names(exprs(data.rma)) %in% mogene10stCONTROL[,1]),]
+gene <- gene[,which(colnames(gene) %in% names(bo.out) == F)]
 
 # Model matrix
-pd <-pData(data.rma)
+pd <-pData(gene)
 mod<-model.matrix(~celltype + Batch -1, data=pd)
 
 # Fit a linear model
@@ -187,7 +195,7 @@ Gene expression changes were assessed by three different comparisons:
 
 The third comparison is where would anticipate to see the least amount of change, under the assumption that the transdifferentiation process was successful. Along the same vein, we would probabaly expect to see a good amount of overlap between the genes identified in the first two comparisons. The volcano plots below highlight the findings from each comparison with significant probes (FDR < 0.001; logFC > 2) represented in turquoise.
 
-```{r volcanoplot, echo=FALSE, fig.align='center', results='asis'}
+```{r volcanoplot, echo=FALSE, fig.align='center'}
 
 # Highlight genes 
 MEFvsDRG$threshold.FDR = as.factor(abs(MEFvsDRG$logFC) > logfc.cutoff & MEFvsDRG$adj.P.Val < p.cutoff)
@@ -201,7 +209,7 @@ SigGenes <- c(length(which(MEFvsDRG$threshold.FDR =="TRUE")), length(which(MEFvs
 p1 <- ggplot(data=MEFvsDRG, aes(x=logFC, y=-log10(P.Value), colour=threshold.FDR)) +
   geom_point(alpha=0.4, size=1.75) +
   theme(legend.position = "none",
-        plot.title = element_text(size = rel(2.0)),
+        plot.title = element_text(size = rel(1.5)),
         axis.title = element_text(size = rel(1.5)),
         axis.text = element_text(size = rel(1.25))) +
   ggtitle('MEF versus DRG') +
@@ -211,7 +219,7 @@ p1 <- ggplot(data=MEFvsDRG, aes(x=logFC, y=-log10(P.Value), colour=threshold.FDR
 p2 <- ggplot(data=MEFvsiNoc, aes(x=logFC, y=-log10(P.Value), colour=threshold.FDR)) +
   geom_point(alpha=0.4, size=1.75) +
   theme(legend.position = "none",
-        plot.title = element_text(size = rel(2.0)),
+        plot.title = element_text(size = rel(1.5)),
         axis.title = element_text(size = rel(1.5)),
         axis.text = element_text(size = rel(1.25))) +
   ggtitle('MEF versus iNoc') +
@@ -221,7 +229,7 @@ p2 <- ggplot(data=MEFvsiNoc, aes(x=logFC, y=-log10(P.Value), colour=threshold.FD
 p3 <- ggplot(data=iNocvsDRG, aes(x=logFC, y=-log10(P.Value), colour=threshold.FDR)) +
   geom_point(alpha=0.4, size=1.75) +
   theme(legend.position = "none",
-        plot.title = element_text(size = rel(2.0)),
+        plot.title = element_text(size = rel(1.5)),
         axis.title = element_text(size = rel(1.5)),
         axis.text = element_text(size = rel(1.25))) +
   ggtitle('iNoc versus DRG') +
@@ -229,7 +237,10 @@ p3 <- ggplot(data=iNocvsDRG, aes(x=logFC, y=-log10(P.Value), colour=threshold.FD
   xlab("log2 fold change") + ylab("-log10 p-value")
 
 grid.arrange(p1, p2, p3, nrow = 2, ncol = 2)
+```
 
+### Table of significant genes
+```{r, results='asis', echo=FALSE}
 kable(cbind(colnames(fit2$coefficients), SigGenes), format='html')
 ```
 
