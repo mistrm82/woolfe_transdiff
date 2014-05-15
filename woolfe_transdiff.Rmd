@@ -38,7 +38,7 @@ source("~/R/scripts/useful functions/roc.R")
 
 ```
 
-### Get variables
+## Get variables
 - get base directory for analyses
 - specify data and results directories
 - specify column headers used in metadata file
@@ -52,7 +52,7 @@ metaDir <- file.path(dataDir, "meta")
 resultsDir <- file.path(baseDir, "results")
 ```
 
-### Load the data and metadata
+## Load the data and metadata
 ```{r load data}
 prevWorkDir = getwd()
 
