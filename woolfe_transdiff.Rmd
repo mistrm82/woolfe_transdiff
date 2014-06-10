@@ -29,7 +29,7 @@ line. We would like to go a little further with the data than we have so far
 
 ## Bioconductor and R libraries used
 ```{r, libraries, echo=TRUE}
-
+loadlibs <- function(){
 library(arrayQualityMetrics)
 library(RColorBrewer)
 library(pd.mogene.1.0.st.v1)
@@ -43,6 +43,11 @@ library(gridExtra)
 library(xtable)
 library(sva)
 library(png)
+library(gProfileR)
+library(GOstats)
+library(AnnotationDbi)
+}
+suppressPackageStartupMessages(loadlibs())
 ```
 
 ## Get variables
@@ -132,8 +137,9 @@ data(mogene10stCONTROL, package="ArrayTools")
 
 # Remove control probes from data
 gene <- data.rma[!(row.names(exprs(data.rma)) %in% mogene10stCONTROL[,1]),]
-gene <- gene[,which(colnames(gene) %in% names(bo.out) == F)]
 
+# Remove outlier sample
+gene <- gene[,which(colnames(gene) %in% names(bo.out) == F)]
 
 # Model matrix
 pd <-pData(gene)
@@ -256,7 +262,8 @@ rids <- rownames(exprs(data.rma))
 en <- unlist(mget(rids, mogene10sttranscriptclusterENTREZID, ifnotfound=NA))
 gn <- unlist(mget(rids, mogene10sttranscriptclusterGENENAME, ifnotfound=NA))
 sm <- unlist(mget(rids, mogene10sttranscriptclusterSYMBOL, ifnotfound=NA))
-ann <- cbind(id=rids, entrez=en, genename=gn, symbol=sm)
+ens <- unlist(mget(rids, mogene10sttranscriptclusterENSEMBL, ifnotfound=NA))
+ann <- cbind(id=rids, entrez=en, genename=gn, symbol=sm, ensembl=ens)
 
 # Merge annotation for each comparison
 annot1 <- merge(ann, MEFvsDRG, by='row.names')
@@ -294,6 +301,75 @@ The number of overlapping genes between the three different comparisons:
 ```{r image5 , echo=FALSE, fig.align='center'}
 img5 <- readPNG("./results/overlappingGenes.png")
  grid.raster(img5) 
+```
+
+## Enrichment Analysis
+For each of the three gene lists we can identify over-represented terms to get an idea of what pathways/processes are regulated. This was done using [GOstats](http://www.bioconductor.org/packages/release/bioc/html/GOstats.html), a Bioconductor package in R. The associated Excel spreadheets for each of the three gene lists are listed below:        
+
+* MEFvDRG: [GO report](./results/GOStats/MEFvsDRG_GOresults.xls) /[KEGG report](./results/KEGG/MEFvsDRG_KEGGresults.xls)
+* MEFvsiNoc: [GO report](./results/GOStats/MEFvsiNoc_GOresults.xls) /[KEGG report](./results/KEGG/MEFvsiNoc_KEGGresults.xls)
+* iNocvsDRG: [GO report](./results/GOStats/iNocvsDRG_GOresults.xls) /[KEGG report](./results/KEGG/iNocvsDRG_KEGGresults.xls)
+
+
+```{r gostat, eval=FALSE}
+genelists <- c("MEFvsDRG", "MEFvsiNoc", "iNocvsDRG")
+
+for (g in 1:3){
+  
+  # get significant gene file
+  file <- get(paste("annot", g, sep=""))
+  
+  # get gene set
+  entrezUniverse<-unique(file$entrez)
+  
+  # get gene universe
+  gsetEntrez <- file$entrez[which(file$threshold.FDR)]
+  
+  #Get parameters
+  GOparams <- new("GOHyperGParams", geneIds = unique(gsetEntrez), universeGeneIds = entrezUniverse, 
+                annotation = "mogene10stprobeset", ontology = "BP", pvalueCutoff = 0.05, conditional = TRUE, 
+              testDirection = "over")
+  KEGGparams <- new("KEGGHyperGParams", geneIds = unique(gsetEntrez), universeGeneIds = entrezUniverse, 
+                annotation = "mogene10stprobeset", pvalueCutoff = 0.05, testDirection = "over")
+  
+  # Run test
+  hgOverGO <- hyperGTest(GOparams)
+  hgOverKEGG <- hyperGTest(KEGGparams)
+  
+  # Write to file
+  write.table(summary(hgOverGO), file=file.path(resultsDir, paste("GOStats/", genelists[g], "_GOresults.xls", sep="")),
+              sep="\t", quote=F)
+  write.table(summary(hgOverKEGG), file=file.path(resultsDir, paste("KEGG/", genelists[g], "_GOresults.xls", sep="")),
+              sep="\t", quote=F)
+  
+}
+```
+
+## iNoc vs DRG
+The enrichment results from the *iNoc versus DRG* could indicate something meaningful about the trandifferentiation process. The top ten terms for both GO and KEGG are listed below. While some terms such as "circulatory system development" don't appear to be that relevant, there are others that might make a bit more sense.
+
+### GO: Biological process
+```{r goresults, results='asis', echo=FALSE}
+x <- read.delim(file.path(resultsDir, "GOStats/iNocvsDRG_GOresults.xls"), sep="\t", header=T, row.names=1)
+x$Pvalue <- as.character(x$Pvalue)
+kable(x[1:10,], format='markdown', row.names=F)
+```
+
+
+### KEGG
+```{r keggresults, results='asis', echo=FALSE}
+x <- read.delim(file.path(resultsDir, "KEGG/iNocvsDRG_KEGGresults.xls"), sep="\t", header=T, row.names=1)
+x$Pvalue <- as.character(x$Pvalue)
+kable(x[1:10,], format='markdown', row.names=F)
+```
+
+### Transcription factor enrichment
+Since the process of transdifferentiation involves a cocktail of transcription factors, a logical next question that arises is whether there are specific TFs that bind to the regulatory regions in our list of DE genes from the iNocvsDRG comparison. We can check this by pulling a lis of TFs and their target genes from [oPPOSUM](http://burgundy.cmmt.ubc.ca/oPOSSUM/) and computing an overlap matrix with p-values generated using the hypergeometric distribution. 
+
+```{r tfenrich, echo=FALSE}
+
+
+
 ```
 
 
