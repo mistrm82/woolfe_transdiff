@@ -32,7 +32,6 @@ line. We would like to go a little further with the data than we have so far
 loadlibs <- function(){
 library(arrayQualityMetrics)
 library(RColorBrewer)
-library(pd.mogene.1.0.st.v1)
 library(mogene10sttranscriptcluster.db)
 library(oligo)
 library(limma)
@@ -46,6 +45,7 @@ library(png)
 library(gProfileR)
 library(GOstats)
 library(AnnotationDbi)
+library(CHBUtils)
 }
 suppressPackageStartupMessages(loadlibs())
 ```
@@ -256,19 +256,21 @@ For each of the comparisons, the number of significant probes were tabulated. Fu
 3. [DRG vs iNoc](./results/iNocvsDRG_siggenes.txt)  
 
 ```{r annotate}
-rids <- rownames(exprs(data.rma))
+rids <- rownames(exprs(gene))
 
 # Get annotations into matrix
-en <- unlist(mget(rids, mogene10sttranscriptclusterENTREZID, ifnotfound=NA))
-gn <- unlist(mget(rids, mogene10sttranscriptclusterGENENAME, ifnotfound=NA))
-sm <- unlist(mget(rids, mogene10sttranscriptclusterSYMBOL, ifnotfound=NA))
 ens <- unlist(mget(rids, mogene10sttranscriptclusterENSEMBL, ifnotfound=NA))
-ann <- cbind(id=rids, entrez=en, genename=gn, symbol=sm, ensembl=ens)
+ens <- ens[which(names(ens) %in% rids)] #ensembl is problematic
+en <- unlist(mget(names(ens), mogene10sttranscriptclusterENTREZID, ifnotfound=NA))
+gn <- unlist(mget(names(ens), mogene10sttranscriptclusterGENENAME, ifnotfound=NA))
+sm <- unlist(mget(names(ens), mogene10sttranscriptclusterSYMBOL, ifnotfound=NA))
+ann <- data.frame(cbind(entrez=en, genename=gn, symbol=sm, ensembl=ens))
 
 # Merge annotation for each comparison
-annot1 <- merge(ann, MEFvsDRG, by='row.names')
-annot2 <- merge(ann, MEFvsiNoc, by='row.names')
-annot3 <- merge(ann, iNocvsDRG, by='row.names')
+
+annot1 <- merge(ann, MEFvsDRG[which(row.names(MEFvsDRG) %in% row.names(ann)),], by.x='row.names', by.y='row.names')
+annot2 <- merge(ann, MEFvsiNoc[which(row.names(MEFvsiNoc) %in% row.names(ann)),], by.x='row.names', by.y='row.names')
+annot3 <- merge(ann, iNocvsDRG[which(row.names(iNocvsDRG) %in% row.names(ann)),], by.x='row.names', by.y='row.names')
 ```
 
 ```{r writefile, eval=FALSE, echo=FALSE}
@@ -304,17 +306,17 @@ img5 <- readPNG("./results/overlappingGenes.png")
 ```
 
 ## Enrichment Analysis
-For each of the three gene lists we can identify over-represented terms to get an idea of what pathways/processes are regulated. This was done using [GOstats](http://www.bioconductor.org/packages/release/bioc/html/GOstats.html), a Bioconductor package in R. The associated Excel spreadheets for each of the three gene lists are listed below:        
+For each of the three gene lists we can identify over-represented terms to get an idea of what biological processes are regulated. This was done using [GOstats](http://www.bioconductor.org/packages/release/bioc/html/GOstats.html), a Bioconductor package in R. The associated Excel spreadheets for each of the three gene lists are listed below:        
 
-* MEFvDRG: [GO report](./results/GOStats/MEFvsDRG_GOresults.xls) /[KEGG report](./results/KEGG/MEFvsDRG_KEGGresults.xls)
-* MEFvsiNoc: [GO report](./results/GOStats/MEFvsiNoc_GOresults.xls) /[KEGG report](./results/KEGG/MEFvsiNoc_KEGGresults.xls)
-* iNocvsDRG: [GO report](./results/GOStats/iNocvsDRG_GOresults.xls) /[KEGG report](./results/KEGG/iNocvsDRG_KEGGresults.xls)
+* MEFvDRG: [GO report](./results/GOStats/MEFvsDRG_GOresults.xls) 
+* MEFvsiNoc: [GO report](./results/GOStats/MEFvsiNoc_GOresults.xls) 
+* iNocvsDRG: [GO report](./results/GOStats/iNocvsDRG_GOresults.xls) 
 
 
 ```{r gostat, eval=FALSE}
 genelists <- c("MEFvsDRG", "MEFvsiNoc", "iNocvsDRG")
 
-for (g in 1:3){
+for (g in 2:3){
   
   # get significant gene file
   file <- get(paste("annot", g, sep=""))
@@ -326,21 +328,21 @@ for (g in 1:3){
   gsetEntrez <- file$entrez[which(file$threshold.FDR)]
   
   #Get parameters
-  GOparams <- new("GOHyperGParams", geneIds = unique(gsetEntrez), universeGeneIds = entrezUniverse, 
+  paramsBP <- new("GOHyperGParams", geneIds = unique(gsetEntrez), universeGeneIds = entrezUniverse, 
                 annotation = "mogene10stprobeset", ontology = "BP", pvalueCutoff = 0.05, conditional = TRUE, 
               testDirection = "over")
-  KEGGparams <- new("KEGGHyperGParams", geneIds = unique(gsetEntrez), universeGeneIds = entrezUniverse, 
-                annotation = "mogene10stprobeset", pvalueCutoff = 0.05, testDirection = "over")
+  
+  paramsMF <- paramsBP
+  ontology(paramsMF) <- "MF"  
+  listOfParamObjs <- list("BP"=GOparams, "MF"=paramsMF)
   
   # Run test
-  hgOverGO <- hyperGTest(GOparams)
-  hgOverKEGG <- hyperGTest(KEGGparams)
-  
+  resultGOList <- lapply(lisOfParamObjs, hyperGTest)
+
   # Write to file
-  write.table(summary(hgOverGO), file=file.path(resultsDir, paste("GOStats/", genelists[g], "_GOresults.xls", sep="")),
-              sep="\t", quote=F)
-  write.table(summary(hgOverKEGG), file=file.path(resultsDir, paste("KEGG/", genelists[g], "_GOresults.xls", sep="")),
-              sep="\t", quote=F)
+  lapply(resultsGOList, function(x){
+    write.table(summary(x), file=file.path(resultsDir, paste("GOStats/", genelists[g], "_", names(x), "results.xls", 
+                                                             sep="")), sep="\t", quote=F, append=FALSE)})
   
 }
 ```
@@ -350,23 +352,47 @@ The enrichment results from the *iNoc versus DRG* could indicate something meani
 
 ### GO: Biological process
 ```{r goresults, results='asis', echo=FALSE}
-x <- read.delim(file.path(resultsDir, "GOStats/iNocvsDRG_GOresults.xls"), sep="\t", header=T, row.names=1)
+x <- read.delim(file.path(resultsDir, "GOStats/iNocvsDRG_BPresults.xls"), sep="\t", header=T, row.names=1)
 x$Pvalue <- as.character(x$Pvalue)
 kable(x[1:10,], format='markdown', row.names=F)
 ```
 
-
-### KEGG
-```{r keggresults, results='asis', echo=FALSE}
-x <- read.delim(file.path(resultsDir, "KEGG/iNocvsDRG_KEGGresults.xls"), sep="\t", header=T, row.names=1)
+### GO: Molecular Function
+```{r goresults, results='asis', echo=FALSE}
+x <- read.delim(file.path(resultsDir, "GOStats/iNocvsDRG_MFresults.xls"), sep="\t", header=T, row.names=1)
 x$Pvalue <- as.character(x$Pvalue)
 kable(x[1:10,], format='markdown', row.names=F)
 ```
 
 ### Transcription factor enrichment
-Since the process of transdifferentiation involves a cocktail of transcription factors, a logical next question that arises is whether there are specific TFs that bind to the regulatory regions in our list of DE genes from the iNocvsDRG comparison. We can check this by pulling a lis of TFs and their target genes from [oPPOSUM](http://burgundy.cmmt.ubc.ca/oPOSSUM/) and computing an overlap matrix with p-values generated using the hypergeometric distribution. 
+Since the process of transdifferentiation involves a cocktail of transcription factors, a logical next question that arises is whether there are specific TFs that bind to the regulatory regions in our list of DE genes from the iNocvsDRG comparison. We can check this by pulling all mouse TFs and their target genes from [oPPOSUM](http://burgundy.cmmt.ubc.ca/oPOSSUM/). Using a hypergeometric test we can compare the proportion of differentially expressed genes containing a particular TFBS to the proportion of the background set that contains the site to determine the probability of a non-random association between the gene set and the TFBS of interest. 
 
 ```{r tfenrich, echo=FALSE}
+
+# Get TF list for query genes
+list.ens <- as.character(annot3$ensembl[which(annot3$threshold.FDR)])
+list.ens <- list.ens[which(!is.na(list.ens))]
+tf <- getTFpairs(listgenes = list.ens, filesqlite = '~/remote-sites/mouseTFpairs.db', upstream=1000)
+
+# Get TF list for all genes to set background
+all.ens <- as.character(annot3$ensembl)
+all.ens <- all.ens[which(!is.na(all.ens))]
+# tf.background <- getTFpairs(listgenes = all.ens, filesqlite = '~/remote-sites/mouseTFpairs.db', upstream=1000)
+tf.background <- read.delim("tf_results", header=T, sep="\t", as.is=T)
+
+# Get hypergeometric p-values for each TF
+uniqTF <- unique(as.character(tf$tf))
+
+hyperP <- sapply(uniqTF, function(x){
+  q <- length(which(tf$tf == x))
+  m <- length(which(tf.background$tf == x))
+  n <- nrow(tf.background) - m
+  k <- nrow(tf)
+  p <- phyper(q -1, m, n, k, lower.tail = TRUE, log.p = FALSE) #prob that observed >= q
+  return(p)
+})
+
+enrichTF <- uniqTF[which(hyperP < 0.05)]
 
 
 
