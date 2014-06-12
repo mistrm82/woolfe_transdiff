@@ -267,7 +267,6 @@ sm <- unlist(mget(names(ens), mogene10sttranscriptclusterSYMBOL, ifnotfound=NA))
 ann <- data.frame(cbind(entrez=en, genename=gn, symbol=sm, ensembl=ens))
 
 # Merge annotation for each comparison
-
 annot1 <- merge(ann, MEFvsDRG[which(row.names(MEFvsDRG) %in% row.names(ann)),], by.x='row.names', by.y='row.names')
 annot2 <- merge(ann, MEFvsiNoc[which(row.names(MEFvsiNoc) %in% row.names(ann)),], by.x='row.names', by.y='row.names')
 annot3 <- merge(ann, iNocvsDRG[which(row.names(iNocvsDRG) %in% row.names(ann)),], by.x='row.names', by.y='row.names')
@@ -287,13 +286,14 @@ write.table(annot3[which(annot3$threshold.FDR), 3:10], file="results//iNocvsDRG_
 The number of significant probes and corresponding number of unique genes from each comparison are listed in the table below:
 ```{r, results='asis', echo=FALSE}
 
+sigList <- vector("list", 3)
 for (i in 1:3){
   x <- get(paste("annot", i, sep=""))
   x <- x[which(x$threshold.FDR),]
   x.genes <- unique(x$symbol)
-  assign(paste("annot", i, sep=""), x.genes)
+  sigList[[i]] <- x.genes
 }
-out <- cbind(colnames(fit2$coefficients), SigGenes, c(length(annot1), length(annot2), length(annot3)))
+out <- cbind(colnames(fit2$coefficients), SigGenes, unlist(lapply(sigList, length)))
 colnames(out) <- c("", "Significant probes", "Significant genes")
 kable(out, format='markdown')
 ```
@@ -306,11 +306,11 @@ img5 <- readPNG("./results/overlappingGenes.png")
 ```
 
 ## Enrichment Analysis
-For each of the three gene lists we can identify over-represented terms to get an idea of what biological processes are regulated. This was done using [GOstats](http://www.bioconductor.org/packages/release/bioc/html/GOstats.html), a Bioconductor package in R. The associated Excel spreadheets for each of the three gene lists are listed below:        
+For each of the three gene lists we can identify over-represented terms to get an idea of what biological processes and molecular functions are represented. This was done using [GOstats](http://www.bioconductor.org/packages/release/bioc/html/GOstats.html), a Bioconductor package in R. The associated Excel spreadheets for each of the three gene lists are listed below:        
 
-* MEFvDRG: [GO report](./results/GOStats/MEFvsDRG_GOresults.xls) 
-* MEFvsiNoc: [GO report](./results/GOStats/MEFvsiNoc_GOresults.xls) 
-* iNocvsDRG: [GO report](./results/GOStats/iNocvsDRG_GOresults.xls) 
+* MEFvDRG: [Biological process results](./results/GOStats/MEFvsDRG_BPresults.xls) / [Molecular function results](./results/GOStats/MEFvsDRG_MFresults.xls)
+* MEFvsiNoc: [Biological process report](./results/GOStats/MEFvsiNoc_BPresults.xls) / [Molecular function results](./results/GOStats/MEFvsiNoc_MFresults.xls)
+* iNocvsDRG: [Biological process report](./results/GOStats/iNocvsDRG_BPresults.xls) / [Molecular function results](./results/GOStats/iNocvsDRG_MFresults.xls) 
 
 
 ```{r gostat, eval=FALSE}
@@ -321,17 +321,14 @@ for (g in 2:3){
   # get significant gene file
   file <- get(paste("annot", g, sep=""))
   
-  # get gene set
+  # get gene set and gene universe
   entrezUniverse<-unique(file$entrez)
-  
-  # get gene universe
   gsetEntrez <- file$entrez[which(file$threshold.FDR)]
   
   #Get parameters
   paramsBP <- new("GOHyperGParams", geneIds = unique(gsetEntrez), universeGeneIds = entrezUniverse, 
                 annotation = "mogene10stprobeset", ontology = "BP", pvalueCutoff = 0.05, conditional = TRUE, 
               testDirection = "over")
-  
   paramsMF <- paramsBP
   ontology(paramsMF) <- "MF"  
   listOfParamObjs <- list("BP"=GOparams, "MF"=paramsMF)
@@ -343,7 +340,6 @@ for (g in 2:3){
   lapply(resultsGOList, function(x){
     write.table(summary(x), file=file.path(resultsDir, paste("GOStats/", genelists[g], "_", names(x), "results.xls", 
                                                              sep="")), sep="\t", quote=F, append=FALSE)})
-  
 }
 ```
 
@@ -351,23 +347,23 @@ for (g in 2:3){
 The enrichment results from the *iNoc versus DRG* could indicate something meaningful about the trandifferentiation process. The top ten terms for both GO and KEGG are listed below. While some terms such as "circulatory system development" don't appear to be that relevant, there are others that might make a bit more sense.
 
 ### GO: Biological process
-```{r goresults, results='asis', echo=FALSE}
+```{r goresults_bp, results='asis', echo=FALSE}
 x <- read.delim(file.path(resultsDir, "GOStats/iNocvsDRG_BPresults.xls"), sep="\t", header=T, row.names=1)
-x$Pvalue <- as.character(x$Pvalue)
+x$Pvalue <- formatC(x$Pvalue, digits=3, format="e")
 kable(x[1:10,], format='markdown', row.names=F)
 ```
 
 ### GO: Molecular Function
-```{r goresults, results='asis', echo=FALSE}
+```{r goresults_mf, results='asis', echo=FALSE}
 x <- read.delim(file.path(resultsDir, "GOStats/iNocvsDRG_MFresults.xls"), sep="\t", header=T, row.names=1)
-x$Pvalue <- as.character(x$Pvalue)
+x$Pvalue <- formatC(x$Pvalue, digits=3, format="e")
 kable(x[1:10,], format='markdown', row.names=F)
 ```
 
 ### Transcription factor enrichment
-Since the process of transdifferentiation involves a cocktail of transcription factors, a logical next question that arises is whether there are specific TFs that bind to the regulatory regions in our list of DE genes from the iNocvsDRG comparison. We can check this by pulling all mouse TFs and their target genes from [oPPOSUM](http://burgundy.cmmt.ubc.ca/oPOSSUM/). Using a hypergeometric test we can compare the proportion of differentially expressed genes containing a particular TFBS to the proportion of the background set that contains the site to determine the probability of a non-random association between the gene set and the TFBS of interest. 
+Since the process of transdifferentiation involves a cocktail of transcription factors, a logical next question that arises is whether there are specific TFs that bind to the regulatory regions in our list of DE genes from the iNocvsDRG comparison. We can check this by pulling all mouse TFs and their target genes from [oPPOSUM](http://burgundy.cmmt.ubc.ca/oPOSSUM/). Using a hypergeometric test we can compare the proportion of differentially expressed genes containing a particular TFBS to the proportion of the background set that contains the site to determine the probability of a non-random association between the gene set and the TFBS of interest. The result is 11 transcription factors that are signficnatly enriched (p < 0.05). The barplot illustrates the number of unique target genes from our list for each ofthe TFs and the associated p-value _(N.B a single target gene may conatin more than one TFBS)_.
 
-```{r tfenrich, echo=FALSE}
+```{r tfenrich, fig.align='center'}
 
 # Get TF list for query genes
 list.ens <- as.character(annot3$ensembl[which(annot3$threshold.FDR)])
@@ -392,9 +388,34 @@ hyperP <- sapply(uniqTF, function(x){
   return(p)
 })
 
+# get ensembl ids
 enrichTF <- uniqTF[which(hyperP < 0.05)]
+enrichTF <- enrichTF[order(enrichTF)]
 
+# get number of target genes per tf
+enrich.df <- subset(unique(tf[,1:2]), tf %in% enrichTF)
+enrich.df <- droplevels(enrich.df)
+bar_heights <- summary(enrich.df$tf)
 
+# setup data frame
+df_all <- data.frame(tfs = factor(enrichTF))
+df_all$bar_heights <- bar_heights[order(names(bar_heights))]
+df_all$pval <-  hyperP[match(enrichTF, uniqTF)]
+labels <- annot3$symbol[which(annot3$ensembl %in% enrichTF)]
+
+ggplot(df_all) +
+  geom_bar(aes(x = tfs, weight = bar_heights, fill=tfs)) +
+  coord_flip() +
+  scale_x_discrete(breaks=as.character(enrichTF), labels=as.character(labels)) +
+  ggtitle('Transcription factors enriched in iNocvsDRG') +
+  ylab('Number of target genes') +
+  xlab('') +
+  guides(fill=FALSE) +
+  theme(legend.position="none",
+        plot.title = element_text(size = rel(2.0)),
+        axis.title = element_text(size = rel(1.5)),
+        axis.text = element_text(size = rel(1.25))) +
+ geom_text(aes(x=tfs, y=bar_heights, ymax=bar_heights, label=formatC(pval, digits=2, format="e"), hjust= 1))
 
 ```
 
