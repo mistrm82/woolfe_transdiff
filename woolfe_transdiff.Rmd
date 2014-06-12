@@ -374,7 +374,7 @@ tf <- getTFpairs(listgenes = list.ens, filesqlite = '~/remote-sites/mouseTFpairs
 all.ens <- as.character(annot3$ensembl)
 all.ens <- all.ens[which(!is.na(all.ens))]
 # tf.background <- getTFpairs(listgenes = all.ens, filesqlite = '~/remote-sites/mouseTFpairs.db', upstream=1000)
-tf.background <- read.delim("tf_results", header=T, sep="\t", as.is=T)
+tf.background <- read.delim("supp data//tf_opossum/tfpairs_background", header=T, sep="\t", as.is=T)
 
 # Get hypergeometric p-values for each TF
 uniqTF <- unique(as.character(tf$tf))
