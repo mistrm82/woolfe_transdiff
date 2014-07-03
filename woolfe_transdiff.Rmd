@@ -331,10 +331,10 @@ for (g in 2:3){
               testDirection = "over")
   paramsMF <- paramsBP
   ontology(paramsMF) <- "MF"  
-  listOfParamObjs <- list("BP"=GOparams, "MF"=paramsMF)
+  listOfParamObjs <- list("BP"=paramsBP, "MF"=paramsMF)
   
   # Run test
-  resultGOList <- lapply(lisOfParamObjs, hyperGTest)
+  resultGOList <- lapply(listOfParamObjs, hyperGTest)
 
   # Write to file
   lapply(resultsGOList, function(x){
